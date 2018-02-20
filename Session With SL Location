@@ -1,0 +1,190 @@
+
+---------------------/*Sessions with place set as Secret London Location coming up in X weeks in X City.*/ ---------------
+/* The Scirpt */
+SELECT mp.id::text AS mainplan_id, mp.name AS plan_name, /*plan ID and Plan name */
+       pt.id::TEXT AS partner_id, pt.name AS partner_name, /*partner*/
+       c.code AS city, mp.category AS category, /*City & Category*/
+       mp.id as id2, p.id as session, mp.name as name, p.expiration as end_date /*Displays end date*/
+
+
+FROM core_plan p
+  JOIN core_city c ON c.id = pl.city_id /*City*/
+  JOIN core_partner pt ON pt.id = mp.partner_id /*partner*/
+  JOIN core_mainplan mp ON mp.id = p.main_plan_id /*Plan ID*/
+  JOIN core_plan_places plc ON plc.plan_id = p.id /*Venue Location*/
+
+WHERE date(p.expiration) BETWEEN current_date AND current_date + interval '{{weeks}} weeks'
+      AND core_plan_places = {{"Secret London Location"}} OR NULL /*Only sessions with Secret Location or Empty*/
+      WHERE rd.end_date >= current_date /*makes sure the sessio is live*/
+      AND c.code = {{city}}
+      AND p.is_active = TRUE
+
+GROUP BY 1,2,4,5,6,7,8,9,12,13
+ORDER BY 3 ASC
+LIMIT 40
+
+GO
+
+/* This is the table option for Fever >>>
+
+main JOINs BETWEEN *fever2* tables:
+*core_plan* (main_plan_id) <---> *core_mainplan* (id)
+*core_plan* (id) <---> *core_ticket* (plan_id)
+*core_user* (id) <---> *core_ticket* (owner_id)
+*core_city* (id) <---> *core_user* (active_city_id)
+*core_mainplan* (partner_id) <---> *core_partner* (id)
+*core_city* (id) <---> *core_partner* (city_id)
+
+*/
+
+/*Here is a simple demo Question written in metabse
+
+See table result - LINK: https://data.feverup.com/question/258?weeks=2&city=LON
+
+*/
+
+SELECT mp.id::text AS mainplan_id, mp.name AS mainplan_name,
+        MAX(date(p.expiration))::text AS expiration_date,
+        pt.id::TEXT AS partner_id, pt.name AS partner_name,
+        cast(p.terms -> 'commission_paid_percentage' as decimal) AS perc_commission,
+        cast(p.terms -> 'commission_paid_fee' as decimal) AS fee_per_ticket,
+        c.code AS city, mp.category AS category,
+        MAX(p.ticket_price) AS price,
+        MIN(date(p.starts_at))::text AS start_date,
+        mp.contract_id, 'http://fvr.to/mp/'||mp.id||'/' AS url
+FROM core_plan p
+    JOIN core_mainplan mp ON mp.id = p.main_plan_id
+    JOIN core_partner pt ON pt.id = mp.partner_id
+    JOIN core_plan_places plc ON plc.plan_id = p.id
+    JOIN core_place pl ON pl.id = plc.place_id
+    JOIN core_city c ON c.id = pl.city_id
+    JOIN core_currency cu ON cu.id = c.currency_id
+
+WHERE date(p.expiration) BETWEEN current_date AND current_date + interval '{{weeks}} weeks'
+AND c.code = {{city}}
+AND p.is_active = TRUE
+
+GROUP BY 1,2,4,5,6,7,8,9,12,13
+ORDER BY 3 ASC
+
+
+
+-----------------------------------------------------------------RODRIGO TICKETS------------------------------------------------------------------------------------------
+
+WITH rodrigo_tickets AS (with plan_info as (
+        select mp.id as id2, p.id as session, mp.name as name, p.expiration as end_date, cast(p.available_tickets as decimal) as tickets,p.label as label,p.ticket_price as price
+
+       from core_mainplan mp
+            join core_plan p on p.main_plan_id=mp.id
+
+        where  mp.id={{id}}
+            and p.expiration >= current_date
+            and p.is_active=true
+            and p.sold_out = false
+        order by 2 asc
+    ),
+
+   info as (
+        select pi.name AS mainplan_name,pi.session, pi.label, pi.price, pi.tickets as tickets,pi.end_date
+        from plan_info pi
+        where pi.end_date >= current_date
+        order by 3 asc
+    ),
+
+
+   total_tickets as(
+        select sum(tickets)
+        from plan_info
+    )
+
+select mainplan_name, session, label, price, tickets from info
+union (select 'TOTAL',0,'',0, * from total_tickets)
+),
+
+
+-----------------------------------------------------------------RODRIGO REVENUE------------------------------------------------------------------------------------------
+rodrigo_revenue AS (
+with comission as (
+        select cast(p.terms -> 'commission_paid_percentage' as decimal)as cm, mp.id as id,p.id as session
+        from core_mainplan mp
+            join core_plan p on p.main_plan_id=mp.id
+
+      where  mp.id={{id}}
+      and p.expiration >= current_date
+      and p.is_active=true
+      and p.sold_out = false
+        order by 2 asc
+    ),
+
+    plan_info as (
+        select mp.id as id2, p.id AS session, mp.name as name, p.expiration as end_date, cast(p.available_tickets as decimal) as tickets,p.label as label,p.ticket_price as price
+
+        from core_mainplan mp
+            join core_plan p on p.main_plan_id=mp.id
+
+        where  mp.id={{id}}
+            and p.expiration >= current_date
+            and p.is_active=true
+        order by 2 asc
+    ),
+
+    info as (
+        select pi.name AS mainplan_name,pi.end_date,pi.session,pi.label, pi.price, ROUND(cast(pi.price*pi.tickets*cms.cm/100 as decimal),2) as net_revenue, cms.cm AS commission
+        from plan_info pi
+            join comission cms on cms.session=pi.session
+        where pi.end_date >= current_date
+        order by 3 asc
+    ),
+
+
+    total_revenue as(
+        select sum(net_revenue)
+        from info
+
+    )
+
+select mainplan_name,session,label,price, commission, net_revenue from info
+union (select 'TOTAL',0,'',0, 0, * from total_revenue)
+
+  ),
+
+ -----------------------------------------------------------------RODRIGO DATES------------------------------------------------------------------------------------------
+
+rodrigo_dates AS (with plan_info as (
+        select mp.id as id2, p.id AS session, mp.name as name, p.expiration as end_date, cast(p.available_tickets as decimal) as tickets,p.label as label,p.ticket_price as price
+
+        from core_mainplan mp
+            join core_plan p on p.main_plan_id=mp.id
+
+        where  mp.id={{id}}
+            and p.expiration >= current_date
+            and p.is_active=true
+        order by 2 asc
+    ),
+
+    info as (
+        select pi.name AS mainplan_name,pi.session,pi.end_date AS end_date
+        from plan_info pi
+        where pi.end_date >= current_date
+
+       order by 3 asc
+    ),
+
+
+    dates_expiration as(
+        select MAX(end_date)
+        from info
+    )
+
+select* from info
+union (select 'TOTAL',0, * from dates_expiration)
+)
+  -----------------------------------------------------------------RODRIGO FINAL------------------------------------------------------------------------------------------
+
+
+  SELECT rt.mainplan_name, rt.label, rd.end_date, rt.price, rr.commission, rt.tickets as tickets_available, rr.net_revenue
+  FROM rodrigo_tickets rt
+  JOIN rodrigo_revenue rr ON rt.session = rr.session
+  JOIN rodrigo_dates rd ON rt.session = rd.session
+  WHERE rd.end_date >= current_date
+  ORDER BY 3 DESC, 4 ASC

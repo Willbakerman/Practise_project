@@ -1,0 +1,75 @@
+----------------------------/*Session that is running out of tickets*/ --------------------
+
+/*>>>>THIS GETS THE TICKETS NUMBER*/
+
+       WITH rodrigo_tickets AS (with plan_info AS (
+               SELECT mp.id AS id2, p.id AS session, mp.name AS name, p.expiration AS end_date, cast(p.available_tickets AS decimal) AS tickets,p.label AS label,p.ticket_price AS price
+
+              FROM core_mainplan mp
+                   JOIN core_plan p ON p.main_plan_id=mp.id
+
+               WHERE  p.available_tickets < 6
+                   AND p.expiration >= current_date
+                   AND p.is_active=true
+                   AND p.sold_out = false
+               ORDER BY 2 ASC
+           ),
+       /*solid finding plan ID statement ^ */
+
+          total_tickets AS(
+               SELECT sum(tickets)
+               FROM plan_info
+           )
+
+ORDER BY ASC 
+LIMIT 60
+
+GO
+
+
+
+
+
+
+
+/* This is the table option for Fever >>>
+
+main JOINs BETWEEN *fever2* tables:
+*core_plan* (main_plan_id) <---> *core_mainplan* (id)
+*core_plan* (id) <---> *core_ticket* (plan_id)
+*core_user* (id) <---> *core_ticket* (owner_id)
+*core_city* (id) <---> *core_user* (active_city_id)
+*core_mainplan* (partner_id) <---> *core_partner* (id)
+*core_city* (id) <---> *core_partner* (city_id)
+
+*/
+
+/*Here is a simple demo Question written in metabse
+
+See table result - LINK: https://data.feverup.com/question/258?weeks=2&city=LON
+
+*/
+
+SELECT mp.id::text AS mainplan_id, mp.name AS mainplan_name,
+        MAX(date(p.expiration))::text AS expiration_date,
+        pt.id::TEXT AS partner_id, pt.name AS partner_name,
+        cast(p.terms -> 'commission_paid_percentage' as decimal) AS perc_commission,
+        cast(p.terms -> 'commission_paid_fee' as decimal) AS fee_per_ticket,
+        c.code AS city, mp.category AS category,
+        MAX(p.ticket_price) AS price,
+        MIN(date(p.starts_at))::text AS start_date,
+        mp.contract_id, 'http://fvr.to/mp/'||mp.id||'/' AS url
+FROM core_plan p
+    JOIN core_mainplan mp ON mp.id = p.main_plan_id
+    JOIN core_partner pt ON pt.id = mp.partner_id
+    JOIN core_plan_places plc ON plc.plan_id = p.id
+    JOIN core_place pl ON pl.id = plc.place_id
+    JOIN core_city c ON c.id = pl.city_id
+    JOIN core_currency cu ON cu.id = c.currency_id
+
+WHERE date(p.expiration) BETWEEN current_date AND current_date + interval '{{weeks}} weeks'
+AND c.code = {{city}}
+AND p.is_active = TRUE
+
+GROUP BY 1,2,4,5,6,7,8,9,12,13
+ORDER BY 3 ASC
